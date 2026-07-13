@@ -28,12 +28,25 @@ const XP_PER_DIFFICULTY = 12;                 // a diff-3 tick = 36 xp
 const STAT_RANK_THRESHOLDS = [0,150,400,800,1400,2200,3200,4400]; // rank I,II,III...
 const ROMAN = ['','I','II','III','IV','V','VI','VII','VIII','IX','X'];
 
+/* ---- bonds tuning ---- */
+const HANGOUT_CHARM_XP = 24;                   // charm gained per logged hangout
+const BOND_XP_PER_HANGOUT = 100;
+const BOND_RANK_THRESHOLDS = [0,100,250,450,700,1000,1350,1750,2200,2700,3300]; // ranks 1..10+
+const STALE_DAYS = 10;                          // flag a bond if unseen this long
+const REL = {
+  friend:  {label:'Friend',  color:'var(--crimson)'},
+  family:  {label:'Family',  color:'var(--intellect)'},
+  partner: {label:'Partner', color:'var(--charm)'},
+};
+
 /* ---- in-memory state ---- */
 let USER = null;
 let PROFILE = null;
 let STATS = {};        // key -> {id, xp}
 let GOALS = [];        // active goals
 let COMPLETIONS = [];  // recent completions ({goal_id, done_on})
+let BONDS = [];        // people ({id,name,relationship,xp,last_seen})
+let BOND_LOGS = [];    // hangouts ({bond_id, logged_on})
 let CURRENT_SCREEN = 'home';
 
 /* ══════════════════════════════════════════════
@@ -78,12 +91,23 @@ function weeklyDeltaByStat(){
     const g=goalById[c.goal_id]; if(!g) return;
     if(new Date(c.done_on+'T00:00:00')>=wk){ out[g.stat_key]=(out[g.stat_key]||0)+g.difficulty*XP_PER_DIFFICULTY; }
   });
+  BOND_LOGS.forEach(b=>{ if(new Date(b.logged_on+'T00:00:00')>=wk) out.charm+=HANGOUT_CHARM_XP; });
   return out;
 }
 
-/* consecutive-day streak up to today */
+/* bond rank helpers */
+function bondRank(xp){ let r=0; for(let i=0;i<BOND_RANK_THRESHOLDS.length;i++){ if(xp>=BOND_RANK_THRESHOLDS[i]) r=i+1; } return Math.max(1,r); }
+function bondProgress(xp){
+  const r=bondRank(xp);
+  const lo=BOND_RANK_THRESHOLDS[r-1] ?? 0;
+  const hi=BOND_RANK_THRESHOLDS[r] ?? (lo+600);
+  return Math.max(0,Math.min(1,(xp-lo)/(hi-lo)));
+}
+
+/* consecutive-day streak up to today — hangouts count too */
 function computeStreak(){
   const set=new Set(COMPLETIONS.map(c=>c.done_on));
+  BOND_LOGS.forEach(b=>set.add(b.logged_on));
   let streak=0; const d=new Date();
   // allow today to be incomplete without breaking streak
   if(!set.has(ymd(d))) d.setDate(d.getDate()-1);
@@ -147,6 +171,10 @@ async function loadAll(){
   const since=ymd(new Date(Date.now()-40*86400000)); // last 40 days is enough for streak+weekly
   const c=await sb.from('completions').select('goal_id,done_on').eq('user_id',USER.id).gte('done_on',since);
   COMPLETIONS=c.data||[];
+  const b=await sb.from('bonds').select('*').eq('user_id',USER.id).order('created_at');
+  BONDS=b.data||[];
+  const bl=await sb.from('bond_logs').select('bond_id,logged_on').eq('user_id',USER.id).gte('logged_on',since);
+  BOND_LOGS=bl.data||[];
 }
 
 /* ══════════════════════════════════════════════
@@ -192,6 +220,30 @@ async function snoozeBump(goalId){
   render();
 }
 
+async function logHangout(bondId){
+  const b=BONDS.find(x=>x.id===bondId); if(!b) return;
+  const t=todayStr();
+  await sb.from('bond_logs').insert({user_id:USER.id,bond_id:bondId,logged_on:t});
+  BOND_LOGS.push({bond_id:bondId,logged_on:t});
+  b.xp=(b.xp||0)+BOND_XP_PER_HANGOUT; b.last_seen=t;
+  await sb.from('bonds').update({xp:b.xp,last_seen:t}).eq('id',bondId);
+  await bumpStat('charm', HANGOUT_CHARM_XP);
+  render();
+}
+async function createBond(name, relationship){
+  if(!name.trim()) return;
+  const r=await sb.from('bonds').insert({user_id:USER.id,name:name.trim(),relationship}).select().single();
+  if(r.error){ alert('Could not save: '+r.error.message); return; }
+  BONDS.push(r.data); CURRENT_SCREEN='bonds'; render();
+}
+async function deleteBond(bondId){
+  if(!confirm('Remove this person? Their hangout history goes too.')) return;
+  await sb.from('bonds').delete().eq('id',bondId);
+  BONDS=BONDS.filter(x=>x.id!==bondId);
+  BOND_LOGS=BOND_LOGS.filter(x=>x.bond_id!==bondId);
+  render();
+}
+
 /* ══════════════════════════════════════════════
    RENDERING
    ══════════════════════════════════════════════ */
@@ -208,6 +260,8 @@ function render(){
   else if(CURRENT_SCREEN==='stats') body.innerHTML=viewStats();
   else if(CURRENT_SCREEN==='goals') body.innerHTML=viewGoals();
   else if(CURRENT_SCREEN==='newgoal') body.innerHTML=viewNewGoal();
+  else if(CURRENT_SCREEN==='bonds') body.innerHTML=viewBonds();
+  else if(CURRENT_SCREEN==='newbond') body.innerHTML=viewNewBond();
   wire();
 }
 
@@ -392,6 +446,48 @@ function viewNewGoal(){
   <div class="cta"><button class="create act-create">CREATE GOAL</button><button class="cancel act-go" data-to="goals">Cancel</button></div>`;
 }
 
+function viewBonds(){
+  const card=b=>{
+    const rel=REL[b.relationship]||REL.friend;
+    const xp=b.xp||0, r=bondRank(xp), pct=Math.round(bondProgress(xp)*100);
+    const seen=b.last_seen?`Last seen ${daysAgo(b.last_seen)===0?'today':daysAgo(b.last_seen)+' day'+(daysAgo(b.last_seen)===1?'':'s')+' ago'}`:'Not logged yet';
+    const stale=b.last_seen && daysAgo(b.last_seen)>=STALE_DAYS;
+    const initial=esc((b.name||'?').trim()[0]||'?').toUpperCase();
+    let pips=''; for(let i=1;i<=10;i++) pips+=`<i class="${i<=r?'on':''}" style="${i<=r?`background:${rel.color}`:''}"></i>`;
+    return `<div class="bond ${stale?'stale':''}" data-bond="${b.id}">
+      <div class="portrait" style="background:${rel.color};color:${b.relationship==='friend'?'var(--bone)':'var(--ink)'}">${initial}</div>
+      <div class="binfo">
+        <div class="bhead"><div class="bname">${esc(b.name)}</div><div class="brel" style="background:${rel.color};color:${b.relationship==='friend'?'var(--bone)':'var(--ink)'}">${rel.label}</div></div>
+        <div class="rankline"><span class="rankno" style="color:${rel.color}">${Math.min(r,10)}</span><span class="rankword">Rank ${ROMAN[Math.min(r,10)]}</span><span class="pips">${pips}</span></div>
+        <div class="btrack"><i style="width:${pct}%;background:${rel.color}"></i></div>
+        <div class="bfoot"><span class="seen ${stale?'stale':''}">${seen}</span>
+          <span style="display:flex;gap:6px"><button class="logbtn act-hang">Log hangout</button><button class="gdel act-delbond">✕</button></span></div>
+      </div>
+    </div>`;
+  };
+  return `
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+    <div class="pagetitle">BONDS</div>
+    <button class="addbtn act-newbond"><span>+ Add person</span></button>
+  </div>
+  <div class="pagesub">The people who matter. Log time together to deepen each bond — every hangout feeds Charm and keeps your streak alive.</div>
+  <div class="grid">${BONDS.length?BONDS.map(card).join(''):'<div class="empty">No one here yet. Add a friend, family member, or partner to start a bond.</div>'}</div>`;
+}
+
+let BDRAFT=null;
+function viewNewBond(){
+  if(!BDRAFT) BDRAFT={name:'',relationship:'friend'};
+  const d=BDRAFT;
+  return `
+  <div class="pagetitle">ADD PERSON</div>
+  <div class="pagesub">Someone you want to spend more real time with.</div>
+  <div class="field"><div class="flabel">Name</div>
+    <input class="textin" id="b-name" value="${esc(d.name)}" placeholder="e.g. Jordan, Mum, Sam"></div>
+  <div class="field"><div class="flabel">Relationship</div>
+    <div class="chips" id="b-rel">${Object.entries(REL).map(([k,v])=>`<div class="chip ${d.relationship===k?'sel':''}" data-k="${k}" style="${d.relationship===k?`background:${v.color};border-color:${v.color};color:${k==='friend'?'var(--bone)':'var(--ink)'}`:''}"><span>${v.label}</span></div>`).join('')}</div></div>
+  <div class="cta"><button class="create act-createbond">ADD PERSON</button><button class="cancel act-go" data-to="bonds">Cancel</button></div>`;
+}
+
 /* ══════════════════════════════════════════════
    WIRING (attach listeners after each render)
    ══════════════════════════════════════════════ */
@@ -402,6 +498,15 @@ function wire(){
   document.querySelectorAll('.act-del').forEach(b=>b.onclick=e=>{ e.stopPropagation(); deleteGoal(b.dataset.goal); });
   document.querySelectorAll('.act-bump').forEach(b=>b.onclick=()=>{ const s=b.closest('.suggest'); acceptBump(s.dataset.goal); });
   document.querySelectorAll('.act-snooze').forEach(b=>b.onclick=()=>{ const s=b.closest('.suggest'); snoozeBump(s.dataset.goal); });
+  document.querySelectorAll('.act-newbond').forEach(b=>b.onclick=()=>{ BDRAFT={name:'',relationship:'friend'}; CURRENT_SCREEN='newbond'; render(); });
+  document.querySelectorAll('.act-hang').forEach(b=>b.onclick=e=>{ e.stopPropagation(); logHangout(b.closest('.bond').dataset.bond); });
+  document.querySelectorAll('.act-delbond').forEach(b=>b.onclick=e=>{ e.stopPropagation(); deleteBond(b.closest('.bond').dataset.bond); });
+  if(CURRENT_SCREEN==='newbond'){
+    const d=BDRAFT;
+    const nm=$('#b-name'); if(nm) nm.oninput=e=>d.name=e.target.value;
+    document.querySelectorAll('#b-rel .chip').forEach(c=>c.onclick=()=>{ d.relationship=c.dataset.k; render(); });
+    document.querySelectorAll('.act-createbond').forEach(btn=>btn.onclick=()=>{ if(!d.name.trim()){ alert('Give them a name first.'); return; } createBond(d.name,d.relationship); });
+  }
 
   // new-goal form bindings
   if(CURRENT_SCREEN==='newgoal'){
