@@ -209,6 +209,50 @@ function levelUpSuggestion(){
   return null;
 }
 
+/* ── history / momentum ── */
+function activityByDay(){
+  const m={};
+  COMPLETIONS.forEach(c=>m[c.done_on]=(m[c.done_on]||0)+1);
+  BOND_LOGS.forEach(b=>m[b.logged_on]=(m[b.logged_on]||0)+1);
+  return m;
+}
+function bestStreak(){
+  const act=activityByDay(); const days=Object.keys(act).sort();
+  let best=0,run=0,prev=null;
+  days.forEach(ds=>{
+    if(prev){ const gap=Math.round((new Date(ds+'T00:00:00')-new Date(prev+'T00:00:00'))/86400000);
+      run = gap===1 ? run+1 : 1; }
+    else run=1;
+    if(run>best) best=run; prev=ds;
+  });
+  return best;
+}
+function xpInRange(start,end){
+  const goalById=Object.fromEntries(GOALS.map(g=>[g.id,g]));
+  const byDayStat={};
+  COMPLETIONS.forEach(c=>{ const d=new Date(c.done_on+'T00:00:00'); if(d>=start&&d<end){ const g=goalById[c.goal_id]; if(!g)return; const k=c.done_on+'|'+g.stat_key; (byDayStat[k]=byDayStat[k]||[]).push(g.difficulty*XP_PER_DIFFICULTY); } });
+  let xp=0; Object.values(byDayStat).forEach(bases=>{ bases.sort((a,b)=>b-a); bases.forEach((b,i)=>xp+=Math.round(b*drFactor(i))); });
+  BOND_LOGS.forEach(bl=>{ const d=new Date(bl.logged_on+'T00:00:00'); if(d>=start&&d<end) xp+=HANGOUT_CHARM_XP; });
+  return xp;
+}
+function weeklyBuckets(n){
+  const out=[]; const thisMon=startOfWeek(new Date());
+  for(let i=n-1;i>=0;i--){
+    const ws=new Date(thisMon); ws.setDate(ws.getDate()-i*7);
+    const we=new Date(ws); we.setDate(we.getDate()+7);
+    const tasks=COMPLETIONS.filter(c=>{const d=new Date(c.done_on+'T00:00:00');return d>=ws&&d<we;}).length
+              + BOND_LOGS.filter(b=>{const d=new Date(b.logged_on+'T00:00:00');return d>=ws&&d<we;}).length;
+    out.push({ws,label:ws.toLocaleDateString('en-GB',{day:'numeric',month:'short'}),tasks,xp:xpInRange(ws,we)});
+  }
+  return out;
+}
+function focusStat(){
+  const wk=weeklyDeltaByStat(); let best=null;
+  STAT_DEFS.forEach(d=>{ const v=wk[d.key]||0, tot=STATS[d.key]?.xp||0;
+    if(!best||v<best.v||(v===best.v&&tot<best.tot)) best={key:d.key,v,tot}; });
+  return best;
+}
+
 /* ══════════════════════════════════════════════
    DATA LOADING
    ══════════════════════════════════════════════ */
@@ -230,7 +274,7 @@ async function seedIfNeeded(){
 async function loadAll(){
   const g=await sb.from('goals').select('*').eq('user_id',USER.id).eq('active',true).order('created_at');
   GOALS=g.data||[];
-  const since=ymd(new Date(Date.now()-40*86400000)); // last 40 days is enough for streak+weekly
+  const since=ymd(new Date(Date.now()-120*86400000)); // ~17 weeks: covers history charts + long streaks
   const c=await sb.from('completions').select('goal_id,done_on').eq('user_id',USER.id).gte('done_on',since);
   COMPLETIONS=c.data||[];
   const b=await sb.from('bonds').select('*').eq('user_id',USER.id).order('created_at');
@@ -395,6 +439,16 @@ function diffPips(n){
   let h=''; for(let i=1;i<=5;i++) h+=`<i class="${i<=n?'on':''}"></i>`;
   return `<span class="diff">${h}<span>Diff ${n}</span></span>`;
 }
+function focusBanner(){
+  if(GOALS.length===0 && BONDS.length===0) return '';
+  const f=focusStat(); if(!f) return '';
+  const label=STAT_LABEL[f.key], col=STAT_COLOR[f.key];
+  const line = f.v<=0 ? `You haven't fed ${label} at all this week.` : `${label} has had the least attention this week.`;
+  return `<div class="focus" style="border-left-color:${col}">
+    <div class="focus-dot" style="background:${col}"></div>
+    <div class="focus-msg"><b>Focus:</b> ${line} <span>A little ${label.toLowerCase()} goal would balance you out.</span></div>
+  </div>`;
+}
 function bumpBanner(){
   const g=levelUpSuggestion(); if(!g) return '';
   const nxt=g.progress_increment?` (+${esc(g.progress_increment)})`:'';
@@ -439,6 +493,7 @@ function viewHome(){
     </div>
   </div>
   ${bumpBanner()}
+  ${focusBanner()}
   <div class="cols">
     <div>
       <div class="sectitle"><h2>STATS</h2><div class="rule"><b></b></div><button class="link act-go" data-to="stats">Full sheet ▸</button></div>
@@ -502,7 +557,61 @@ function viewStats(){
     </div>
   </div>
   <div class="sectitle"><h2>STATS</h2><div class="rule"><b></b></div></div>
-  <div class="stats-grid">${STAT_DEFS.map(card).join('')}</div>`;
+  <div class="stats-grid">${STAT_DEFS.map(card).join('')}</div>
+  ${viewHistory()}`;
+}
+
+function viewHistory(){
+  const streak=computeStreak(), best=bestStreak();
+  const weeks=weeklyBuckets(8);
+  const maxTasks=Math.max(1,...weeks.map(w=>w.tasks));
+  const maxXp=Math.max(1,...weeks.map(w=>w.xp));
+  // weekly bars (tasks) with a subtle xp line overlaid
+  const barW=100/weeks.length;
+  const bars=weeks.map(w=>{
+    const h=Math.round(w.tasks/maxTasks*100);
+    return `<div class="wbar-col"><div class="wbar-track"><div class="wbar" style="height:${h}%"></div></div><div class="wbar-lbl">${w.label.split(' ')[0]}</div></div>`;
+  }).join('');
+  const pts=weeks.map((w,i)=>{
+    const x=barW*i+barW/2, y=100-(w.xp/maxXp*100);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  // activity heatmap: last 5 weeks
+  const act=activityByDay();
+  const heatMon=startOfWeek(new Date()); heatMon.setDate(heatMon.getDate()-4*7);
+  let cols='';
+  for(let wcol=0;wcol<5;wcol++){
+    let cells='';
+    for(let drow=0;drow<7;drow++){
+      const d=new Date(heatMon); d.setDate(d.getDate()+wcol*7+drow);
+      const key=ymd(d); const future=d>new Date();
+      const n=act[key]||0;
+      const lvl = future?'f':n===0?'0':n===1?'1':n<=2?'2':n<=4?'3':'4';
+      cells+=`<div class="heat-cell h${lvl}" title="${key}: ${n}"></div>`;
+    }
+    cols+=`<div class="heat-col">${cells}</div>`;
+  }
+  const totalXp8=weeks.reduce((s,w)=>s+w.xp,0);
+  return `
+  <div class="sectitle" style="margin-top:26px"><h2>MOMENTUM</h2><div class="rule"><b></b></div></div>
+  <div class="tiles" style="margin-bottom:18px">
+    <div class="tile gold"><div class="tv">${streak}</div><div class="tl">Current streak</div><div class="tsmall">Days in a row</div></div>
+    <div class="tile"><div class="tv">${best}</div><div class="tl">Best streak</div><div class="tsmall">Your record</div></div>
+    <div class="tile crim"><div class="tv">${weeks[weeks.length-1].tasks}</div><div class="tl">This week</div><div class="tsmall">Tasks logged</div></div>
+  </div>
+
+  <div class="hist-card">
+    <div class="hist-head"><span>Weekly activity</span><span class="hist-legend"><i class="lg-bar"></i>tasks <i class="lg-line"></i>xp</span></div>
+    <div class="wbars">
+      <svg class="xp-line" viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points="${pts}"/></svg>
+      ${bars}
+    </div>
+  </div>
+
+  <div class="hist-card">
+    <div class="hist-head"><span>Active days · last 5 weeks</span><span class="hist-legend muted">${totalXp8} xp over 8 weeks</span></div>
+    <div class="heat">${cols}</div>
+  </div>`;
 }
 
 function viewGoals(){
