@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0b0b0b">
+<title>QUEST</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="bg-slash"></div>
+<div class="bg-blade"></div>
+
+<!-- Auth screen -->
+<div id="screen-auth" class="auth-wrap hidden">
+  <div class="auth-brand">QUEST<span>//</span></div>
+  <div class="auth-tag">Level up your life</div>
+  <div class="auth-card">
+    <input id="auth-email" type="email" placeholder="Email" autocomplete="email">
+    <input id="auth-pass" type="password" placeholder="Password" autocomplete="current-password">
+    <button id="auth-go" class="go">ENTER</button>
+    <div class="auth-toggle">
+      <span id="auth-toggle-text">New here?</span>
+      <button id="auth-toggle-btn">Create an account</button>
+    </div>
+    <div id="auth-msg" class="auth-msg"></div>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app" class="hidden">
+  <div class="stage">
+    <div class="topbar">
+      <div class="brand">QUEST<span>//</span></div>
+      <div class="topright" id="topright"></div>
+    </div>
+    <div id="screen-body"></div>
+  </div>
+  <div class="nav">
+    <button data-screen="home"><span>Home</span></button>
+    <button data-screen="today"><span>Today</span></button>
+    <button data-screen="stats"><span>Stats</span></button>
+    <button data-screen="goals"><span>Goals</span></button>
+  </div>
+</div>
+
+<div id="boot" class="empty" style="margin-top:40vh">Loading…</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
