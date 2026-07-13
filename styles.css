@@ -299,6 +299,33 @@ input{font-family:inherit}
 .music-vol{display:flex;align-items:center;gap:8px;color:#888;font-size:13px}
 .music-vol input{flex:1;accent-color:var(--crimson)}
 
-@media(max-width:820px){.hero{grid-template-columns:1fr}.cols{grid-template-columns:1fr}}
+@media(max-width:820px){.hero{grid-template-columns:1fr}.cols{grid-template-columns:1fr;gap:22px}}
 @media(max-width:700px){.grid{grid-template-columns:1fr}}
-@media(max-width:560px){.tiles{grid-template-columns:1fr 1fr}.stats-grid{grid-template-columns:1fr}.pagetitle{font-size:32px}.cta{flex-direction:column}}
+@media(max-width:560px){
+  .stage{padding:22px 15px 84px}
+  .stats-grid{grid-template-columns:1fr}
+  .pagetitle{font-size:32px}
+  .cta{flex-direction:column}
+  /* compact hero */
+  .hero{gap:12px;margin-bottom:14px}
+  .levelcard{padding:14px 16px}
+  .lvl-num{font-size:56px}
+  .tiles{grid-template-columns:repeat(3,1fr);gap:8px}
+  .tile{padding:12px 8px}
+  .tile .tv{font-size:28px}
+  .tile .tv small{font-size:16px}
+  .tile .tl{font-size:10px;letter-spacing:1px;margin-top:4px}
+  .tile .tsmall{display:none}
+  /* calmer sections */
+  .sectitle{margin-bottom:12px}
+  .sectitle h2{font-size:20px}
+  .cols{gap:24px}
+  /* tighter mini-stat rows on the dashboard */
+  .mstat{gap:10px;margin-bottom:8px}
+  .mstat .nm{width:78px;font-size:13px}
+  .mstat .rk{font-size:18px;width:28px}
+  .mstat .dl{width:38px}
+  /* momentum charts breathe a little less */
+  .wbars{height:100px}
+  .hist-card{padding:14px}
+}
