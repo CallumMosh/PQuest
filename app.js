@@ -86,6 +86,7 @@ let EARNED = new Set();     // achievement keys earned
 let EARNED_DATES = {};      // key -> earned_on
 let POPUP_QUEUE = [];       // achievements waiting to celebrate
 let POPUP_SHOWING = false;
+let DECAY_APPLIED = [];     // stats that slipped on this load: {key, amount}
 let CURRENT_SCREEN = 'home';
 
 /* ══════════════════════════════════════════════
@@ -286,6 +287,62 @@ async function loadAll(){
   EARNED_DATES={}; (ac.data||[]).forEach(r=>EARNED_DATES[r.key]=r.earned_on);
 }
 
+/* ── weekly decay (applied on load, no server job) ──
+   For each fully-completed week since we last checked, each stat that
+   fell short of its goals slips a little: shortfall-proportional, ~5% of
+   the current rank's band at full neglect, never below the current rank. */
+function weeklyTargetFor(g){ return (g.days && g.days.length) ? g.days.length : (g.times_per_week || 1); }
+async function applyDecay(){
+  DECAY_APPLIED=[];
+  const thisMon=startOfWeek(new Date());
+  const lastCompletedMon=new Date(thisMon); lastCompletedMon.setDate(lastCompletedMon.getDate()-7);
+
+  if(!PROFILE.decay_through){ // first ever run — start the clock now, no back-decay
+    PROFILE.decay_through=ymd(thisMon);
+    await sb.from('profiles').update({decay_through:PROFILE.decay_through}).eq('id',USER.id);
+    return;
+  }
+
+  let cursor=new Date(PROFILE.decay_through+'T00:00:00');
+  const earliest=new Date(thisMon); earliest.setDate(earliest.getDate()-12*7); // cap: at most 12 weeks
+  if(cursor<earliest) cursor=earliest;
+
+  const changed={}, totals={}; let guard=0;
+  while(cursor<=lastCompletedMon && guard<16){
+    const ws=new Date(cursor), we=new Date(cursor); we.setDate(we.getDate()+7);
+    STAT_DEFS.forEach(d=>{
+      const goals=GOALS.filter(g=>g.stat_key===d.key && new Date(g.created_at) < ws); // week's grace for new goals
+      if(!goals.length) return;
+      let expected=0, got=0;
+      goals.forEach(g=>{
+        const target=weeklyTargetFor(g);
+        const done=COMPLETIONS.filter(c=>{ if(c.goal_id!==g.id) return false; const cd=new Date(c.done_on+'T00:00:00'); return cd>=ws&&cd<we; }).length;
+        expected+=target; got+=Math.min(done,target);
+      });
+      if(expected<=0) return;
+      const shortfall=(expected-got)/expected;
+      if(shortfall<=0) return; // fed it enough — no slip
+      const xp=(changed[d.key]!==undefined?changed[d.key]:(STATS[d.key]?.xp||0));
+      const r=rankFromXp(xp);
+      const lo=STAT_RANK_THRESHOLDS[r-1]??0;
+      const hi=STAT_RANK_THRESHOLDS[r]??(lo+1200);
+      const dec=Math.round((hi-lo)*0.05*shortfall);
+      const newXp=Math.max(lo, xp-dec); // hard floor at current rank
+      const applied=xp-newXp;
+      if(applied>0){ changed[d.key]=newXp; totals[d.key]=(totals[d.key]||0)+applied; }
+    });
+    cursor.setDate(cursor.getDate()+7); guard++;
+  }
+
+  for(const k of Object.keys(changed)){
+    STATS[k].xp=changed[k];
+    await sb.from('stats').update({xp:changed[k]}).eq('id',STATS[k].id);
+  }
+  PROFILE.decay_through=ymd(thisMon);
+  await sb.from('profiles').update({decay_through:PROFILE.decay_through}).eq('id',USER.id);
+  DECAY_APPLIED=Object.entries(totals).map(([key,amount])=>({key,amount}));
+}
+
 /* ══════════════════════════════════════════════
    ACTIONS
    ══════════════════════════════════════════════ */
@@ -439,6 +496,14 @@ function diffPips(n){
   let h=''; for(let i=1;i<=5;i++) h+=`<i class="${i<=n?'on':''}"></i>`;
   return `<span class="diff">${h}<span>Diff ${n}</span></span>`;
 }
+function decayBanner(){
+  if(!DECAY_APPLIED.length) return '';
+  const parts=DECAY_APPLIED.map(x=>`${STAT_LABEL[x.key]} −${x.amount}`).join(' · ');
+  return `<div class="decay">
+    <div class="decay-msg"><b>Quiet stretch.</b> A few stats slipped: ${parts}. Nothing lost that a good week won't win back.</div>
+    <button class="decay-x" id="decay-dismiss" title="Dismiss">✕</button>
+  </div>`;
+}
 function focusBanner(){
   if(GOALS.length===0 && BONDS.length===0) return '';
   const f=focusStat(); if(!f) return '';
@@ -492,6 +557,7 @@ function viewHome(){
       <div class="tile"><div class="tv">${weeklyPct()}%</div><div class="tl">This week</div><div class="tsmall">Goals on track</div></div>
     </div>
   </div>
+  ${decayBanner()}
   ${bumpBanner()}
   ${focusBanner()}
   <div class="cols">
@@ -771,6 +837,7 @@ function viewAwards(){
    ══════════════════════════════════════════════ */
 function wire(){
   document.querySelectorAll('.act-go').forEach(b=>b.onclick=()=>{ CURRENT_SCREEN=b.dataset.to; render(); });
+  const dx=document.getElementById('decay-dismiss'); if(dx) dx.onclick=()=>{ DECAY_APPLIED=[]; render(); };
   document.querySelectorAll('.act-new').forEach(b=>b.onclick=()=>{ DRAFT=freshDraft(); CURRENT_SCREEN='newgoal'; render(); });
   document.querySelectorAll('.task').forEach(t=>t.onclick=()=>toggleTask(t.dataset.goal));
   document.querySelectorAll('.act-del').forEach(b=>b.onclick=e=>{ e.stopPropagation(); deleteGoal(b.dataset.goal); });
@@ -862,6 +929,7 @@ async function boot(){
   await seedIfNeeded();
   await loadAll();
   applyTheme(PROFILE.theme||'crimson');
+  await applyDecay();                 // apply any weekly slips since last visit
   await evaluateAchievements(true);   // backfill already-earned, no pop-up spam
   $('#boot').classList.add('hidden'); $('#app').classList.remove('hidden');
   CURRENT_SCREEN='home'; render();
