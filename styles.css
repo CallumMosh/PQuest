@@ -208,11 +208,42 @@ input{font-family:inherit}
 .bfoot .seen.stale{color:var(--crimson)}
 .logbtn{font-family:'Saira Condensed',sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:1px;font-size:11px;color:var(--bone);background:transparent;border:2px solid #3a3a3a;padding:5px 12px}
 
+/* ── awards ── */
+.badge-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-bottom:22px}
+.badge{background:var(--smoke);border:2px solid #242424;padding:16px 14px;text-align:center;opacity:.55}
+.badge.got{opacity:1;border-color:var(--crimson)}
+.badge-glyph{font-family:'Anton',sans-serif;font-size:34px;line-height:1;color:#555;margin-bottom:8px}
+.badge.got .badge-glyph{color:var(--crimson)}
+.badge-name{font-family:'Saira Condensed',sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:1px;font-size:16px}
+.badge-desc{font-family:'Saira Condensed',sans-serif;font-weight:600;font-size:12px;color:#777;text-transform:uppercase;letter-spacing:.5px;margin-top:3px}
+.badge-reward{font-family:'Saira Condensed',sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:1px;font-size:10px;color:var(--gold);margin-top:8px;border-top:1px solid #2a2a2a;padding-top:8px}
+
+.swatches{display:flex;flex-wrap:wrap;gap:10px}
+.swatch{display:flex;align-items:center;gap:8px;background:var(--smoke);border:2px solid #2c2c2c;color:var(--bone);font-family:'Saira Condensed',sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:1px;font-size:13px;padding:8px 14px;transform:skewX(-6deg)}
+.swatch>*{transform:skewX(6deg)}
+.swatch .dot{width:16px;height:16px;display:block}
+.swatch.sel{border-color:var(--bone)}
+.swatch.locked{opacity:.45}
+
+/* ── achievement pop-up ── */
+.pop-overlay{position:fixed;inset:0;background:rgba(5,5,5,.82);display:flex;align-items:center;justify-content:center;z-index:50;padding:24px;animation:popfade .18s ease}
+@keyframes popfade{from{opacity:0}to{opacity:1}}
+.pop-card{background:var(--ink);border:3px solid var(--crimson);padding:34px 30px;max-width:340px;width:100%;text-align:center;position:relative;clip-path:polygon(0 0,100% 0,100% 92%,94% 100%,0 100%);animation:popin .28s cubic-bezier(.2,.9,.3,1.3)}
+@keyframes popin{from{transform:scale(.8) skewX(-3deg);opacity:0}to{transform:scale(1) skewX(0);opacity:1}}
+.pop-eyebrow{font-family:'Saira Condensed',sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:3px;font-size:12px;color:var(--crimson);margin-bottom:12px}
+.pop-glyph{font-family:'Anton',sans-serif;font-size:64px;line-height:1;color:var(--gold);margin-bottom:8px}
+.pop-name{font-family:'Anton',sans-serif;font-style:italic;transform:skewX(-6deg);font-size:34px;letter-spacing:1px;margin-bottom:4px}
+.pop-desc{font-family:'Saira Condensed',sans-serif;font-weight:600;text-transform:uppercase;letter-spacing:1px;font-size:13px;color:#9a9a9a}
+.pop-reward{font-family:'Saira Condensed',sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:1px;font-size:12px;color:var(--gold);margin-top:14px;border-top:1px solid #2a2a2a;padding-top:14px}
+.pop-close{margin-top:20px;background:var(--crimson);color:var(--ink);border:none;font-family:'Anton',sans-serif;font-style:italic;font-size:20px;padding:10px 30px}
+
 /* ── bottom nav ── */
-.nav{position:fixed;bottom:0;left:0;right:0;background:#050505;border-top:3px solid var(--crimson);display:flex;justify-content:center;gap:4px;padding:10px;z-index:5}
-.nav button{font-family:'Saira Condensed',sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;font-size:13px;color:#777;padding:8px 18px;transform:skewX(-8deg);background:none;border:none}
+.nav{position:fixed;bottom:0;left:0;right:0;background:#050505;border-top:3px solid var(--crimson);display:flex;justify-content:center;gap:2px;padding:8px 6px;z-index:5;overflow-x:auto;scrollbar-width:none}
+.nav::-webkit-scrollbar{display:none}
+.nav button{font-family:'Saira Condensed',sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:1px;font-size:12px;color:#777;padding:8px 12px;transform:skewX(-8deg);background:none;border:none;flex-shrink:0;white-space:nowrap}
 .nav button span{display:inline-block;transform:skewX(8deg)}
 .nav button.on{background:var(--crimson);color:var(--ink)}
+@media(max-width:400px){.nav button{padding:8px 9px;letter-spacing:.3px}}
 
 .empty{text-align:center;color:#666;padding:40px 20px;font-family:'Saira Condensed',sans-serif;font-weight:600;text-transform:uppercase;letter-spacing:1px;font-size:14px}
 .hidden{display:none !important}
