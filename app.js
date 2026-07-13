@@ -543,19 +543,14 @@ function viewHome(){
   const trow=g=>{
     const done=doneToday(g.id);
     return `<div class="trow ${done?'done':''}" data-goal="${g.id}"><div class="tick">${done?'&#10003;':''}</div>
-      <div class="tnm">${esc(g.name)}</div></div>`;
+      <div class="tnm">${esc(g.name)}</div>
+      <span class="stat-pill" style="background:${STAT_COLOR[g.stat_key]}">${STAT_LABEL[g.stat_key]}</span></div>`;
   };
   const todayGrouped=()=>{
     if(!todays.length) return '<div class="empty">No tasks scheduled today.</div>';
-    return STAT_DEFS.map(d=>{
-      const items=todays.filter(g=>g.stat_key===d.key);
-      if(!items.length) return '';
-      const doneN=items.filter(g=>doneToday(g.id)).length;
-      return `<div class="tgroup">
-        <div class="tgroup-h"><span class="tgroup-dot" style="background:${STAT_COLOR[d.key]}"></span>${d.label}<em>${doneN}/${items.length}</em></div>
-        ${items.map(trow).join('')}
-      </div>`;
-    }).join('');
+    // order so same-stat tasks sit together (stat order), no headers
+    const ordered=STAT_DEFS.flatMap(d=>todays.filter(g=>g.stat_key===d.key));
+    return ordered.map(trow).join('');
   };
   return `
   <div class="hero">
