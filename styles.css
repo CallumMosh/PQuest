@@ -186,6 +186,28 @@ input{font-family:inherit}
 .auth-toggle button{background:none;border:none;color:var(--gold);font-weight:600;text-decoration:underline}
 .auth-msg{color:var(--crimson);font-size:13px;text-align:center;margin-top:12px;min-height:18px;font-family:'Saira Condensed',sans-serif;font-weight:600;letter-spacing:.5px}
 
+/* ── bonds ── */
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.bond{position:relative;background:var(--smoke);border:2px solid #242424;padding:18px;display:flex;gap:16px;transform:skewX(-3deg)}
+.bond>*{transform:skewX(3deg)}
+.bond.stale{border-color:#3a1c1c}
+.portrait{width:66px;height:78px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-family:'Anton',sans-serif;font-style:italic;font-size:30px;clip-path:polygon(0 0,100% 0,100% 86%,82% 100%,0 100%)}
+.binfo{flex:1;min-width:0}
+.bhead{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.bname{font-family:'Saira Condensed',sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:1px;font-size:20px}
+.brel{font-family:'Saira Condensed',sans-serif;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;font-size:10px;padding:2px 8px;flex-shrink:0}
+.rankline{display:flex;align-items:center;gap:8px;margin:8px 0 6px}
+.rankno{font-family:'Anton',sans-serif;font-style:italic;font-size:30px;line-height:.8}
+.rankword{font-family:'Saira Condensed',sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:2px;font-size:12px;color:#8a8a8a}
+.pips{display:flex;gap:3px;margin-left:auto}
+.pips i{width:8px;height:8px;background:#333;display:block;transform:skewX(-12deg)}
+.btrack{height:10px;background:#000;border:1px solid #2c2c2c;position:relative;overflow:hidden;margin-bottom:8px}
+.btrack>i{position:absolute;left:0;top:0;bottom:0;display:block}
+.bfoot{display:flex;justify-content:space-between;align-items:center;font-family:'Saira Condensed',sans-serif;font-weight:600;text-transform:uppercase;letter-spacing:1px;font-size:11px;color:#8a8a8a;gap:8px}
+.bfoot .seen{color:#777}
+.bfoot .seen.stale{color:var(--crimson)}
+.logbtn{font-family:'Saira Condensed',sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:1px;font-size:11px;color:var(--bone);background:transparent;border:2px solid #3a3a3a;padding:5px 12px}
+
 /* ── bottom nav ── */
 .nav{position:fixed;bottom:0;left:0;right:0;background:#050505;border-top:3px solid var(--crimson);display:flex;justify-content:center;gap:4px;padding:10px;z-index:5}
 .nav button{font-family:'Saira Condensed',sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;font-size:13px;color:#777;padding:8px 18px;transform:skewX(-8deg);background:none;border:none}
