@@ -542,9 +542,20 @@ function viewHome(){
   };
   const trow=g=>{
     const done=doneToday(g.id);
-    return `<div class="trow ${done?'done':''}"><div class="tick">${done?'&#10003;':''}</div>
-      <div class="tnm">${esc(g.name)}</div>
-      <span class="stat-pill" style="background:${STAT_COLOR[g.stat_key]}">${STAT_LABEL[g.stat_key]}</span></div>`;
+    return `<div class="trow ${done?'done':''}" data-goal="${g.id}"><div class="tick">${done?'&#10003;':''}</div>
+      <div class="tnm">${esc(g.name)}</div></div>`;
+  };
+  const todayGrouped=()=>{
+    if(!todays.length) return '<div class="empty">No tasks scheduled today.</div>';
+    return STAT_DEFS.map(d=>{
+      const items=todays.filter(g=>g.stat_key===d.key);
+      if(!items.length) return '';
+      const doneN=items.filter(g=>doneToday(g.id)).length;
+      return `<div class="tgroup">
+        <div class="tgroup-h"><span class="tgroup-dot" style="background:${STAT_COLOR[d.key]}"></span>${d.label}<em>${doneN}/${items.length}</em></div>
+        ${items.map(trow).join('')}
+      </div>`;
+    }).join('');
   };
   return `
   <div class="hero">
@@ -565,7 +576,7 @@ function viewHome(){
   <div class="cols">
     <div>
       <div class="sectitle"><h2>TODAY</h2><div class="rule"><b></b></div><button class="link act-go" data-to="today">Open day ▸</button></div>
-      ${todays.length?todays.map(trow).join(''):'<div class="empty">No tasks scheduled today.</div>'}
+      ${todayGrouped()}
     </div>
     <div>
       <div class="sectitle"><h2>STATS</h2><div class="rule"><b></b></div><button class="link act-go" data-to="stats">Full sheet ▸</button></div>
@@ -842,6 +853,7 @@ function wire(){
   const dx=document.getElementById('decay-dismiss'); if(dx) dx.onclick=()=>{ DECAY_APPLIED=[]; render(); };
   document.querySelectorAll('.act-new').forEach(b=>b.onclick=()=>{ DRAFT=freshDraft(); CURRENT_SCREEN='newgoal'; render(); });
   document.querySelectorAll('.task').forEach(t=>t.onclick=()=>toggleTask(t.dataset.goal));
+  document.querySelectorAll('.trow[data-goal]').forEach(t=>t.onclick=()=>toggleTask(t.dataset.goal));
   document.querySelectorAll('.act-del').forEach(b=>b.onclick=e=>{ e.stopPropagation(); deleteGoal(b.dataset.goal); });
   document.querySelectorAll('.act-bump').forEach(b=>b.onclick=()=>{ const s=b.closest('.suggest'); acceptBump(s.dataset.goal); });
   document.querySelectorAll('.act-snooze').forEach(b=>b.onclick=()=>{ const s=b.closest('.suggest'); snoozeBump(s.dataset.goal); });
