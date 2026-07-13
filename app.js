@@ -496,6 +496,10 @@ function diffPips(n){
   let h=''; for(let i=1;i<=5;i++) h+=`<i class="${i<=n?'on':''}"></i>`;
   return `<span class="diff">${h}<span>Diff ${n}</span></span>`;
 }
+function homeBanner(){
+  // show only the single most important banner, to keep the phone view calm
+  return decayBanner() || bumpBanner() || focusBanner();
+}
 function decayBanner(){
   if(!DECAY_APPLIED.length) return '';
   const parts=DECAY_APPLIED.map(x=>`${STAT_LABEL[x.key]} −${x.amount}`).join(' · ');
@@ -557,17 +561,15 @@ function viewHome(){
       <div class="tile"><div class="tv">${weeklyPct()}%</div><div class="tl">This week</div><div class="tsmall">Goals on track</div></div>
     </div>
   </div>
-  ${decayBanner()}
-  ${bumpBanner()}
-  ${focusBanner()}
+  ${homeBanner()}
   <div class="cols">
-    <div>
-      <div class="sectitle"><h2>STATS</h2><div class="rule"><b></b></div><button class="link act-go" data-to="stats">Full sheet ▸</button></div>
-      ${STAT_DEFS.map(d=>stat(d.key)).join('')}
-    </div>
     <div>
       <div class="sectitle"><h2>TODAY</h2><div class="rule"><b></b></div><button class="link act-go" data-to="today">Open day ▸</button></div>
       ${todays.length?todays.map(trow).join(''):'<div class="empty">No tasks scheduled today.</div>'}
+    </div>
+    <div>
+      <div class="sectitle"><h2>STATS</h2><div class="rule"><b></b></div><button class="link act-go" data-to="stats">Full sheet ▸</button></div>
+      ${STAT_DEFS.map(d=>stat(d.key)).join('')}
     </div>
   </div>`;
 }
