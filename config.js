@@ -6,7 +6,7 @@
 const SUPABASE_URL = "https://xwsmikpcvforfvsnxhpc.supabase.co";
 
 // 👇 PASTE YOUR PUBLISHABLE KEY BETWEEN THE QUOTES (the sb_publishable_... one)
-const SUPABASE_KEY = "PASTE_YOUR_PUBLISHABLE_KEY_HERE";
+const SUPABASE_KEY = "sb_publishable_bz7xrq7anM5BU1ekndJ6xw_bv7ScyDk";
 
 // ─────────────────────────────────────────────────────────────
 //  Don't touch anything below.
