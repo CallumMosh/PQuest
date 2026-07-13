@@ -43,6 +43,37 @@ const REL = {
   partner: {label:'Partner', color:'var(--charm)'},
 };
 
+/* ---- themes (reskin the accent) ---- */
+const THEMES = {
+  crimson: {label:'Crimson', c:'#e4002b', b:'#a0001c'},
+  azure:   {label:'Azure',   c:'#2f9bff', b:'#1c5fa0'},
+  gold:    {label:'Gold',    c:'#f0a500', b:'#a87400'},
+  violet:  {label:'Violet',  c:'#8b5cf6', b:'#5b3aa8'},
+  rose:    {label:'Rose',    c:'#ff5c8a', b:'#b03a5f'},
+  mono:    {label:'Mono',    c:'#e8e8e8', b:'#9a9a9a'},
+};
+
+/* ---- achievements catalogue ----
+   each: key, name, desc, cat, glyph, cond(); optional title / theme reward */
+const ACHIEVEMENTS = [
+  // streak
+  {key:'spark',      cat:'streak', glyph:'▲', name:'Spark',      desc:'3-day streak',           cond:()=>computeStreak()>=3},
+  {key:'kindling',   cat:'streak', glyph:'▲', name:'Kindling',   desc:'7-day streak',           cond:()=>computeStreak()>=7,   title:'The Steady'},
+  {key:'ablaze',     cat:'streak', glyph:'▲', name:'Ablaze',     desc:'30-day streak',          cond:()=>computeStreak()>=30,  title:'The Relentless', theme:'azure'},
+  {key:'inferno',    cat:'streak', glyph:'▲', name:'Inferno',    desc:'100-day streak',         cond:()=>computeStreak()>=100, title:'The Unbroken',   theme:'gold'},
+  // stats
+  {key:'adept',      cat:'stat',   glyph:'✦', name:'Adept',      desc:'Reach Rank III in a stat',   cond:()=>maxStatRank()>=3},
+  {key:'master',     cat:'stat',   glyph:'✦', name:'Master',     desc:'Reach Rank V in a stat',     cond:()=>maxStatRank()>=5,  title:'The Master',      theme:'violet'},
+  {key:'rounded',    cat:'stat',   glyph:'✦', name:'Well-Rounded', desc:'Rank III in every stat',   cond:()=>minStatRank()>=3,  title:'Well-Rounded'},
+  {key:'renaissance',cat:'stat',   glyph:'✦', name:'Renaissance',desc:'Rank V in every stat',       cond:()=>minStatRank()>=5,  title:'The Renaissance', theme:'mono'},
+  // bonds
+  {key:'reachout',   cat:'bond',   glyph:'◆', name:'Reach Out',  desc:'Add your first bond',        cond:()=>BONDS.length>=1},
+  {key:'companion',  cat:'bond',   glyph:'◆', name:'Companion',  desc:'Reach Rank III with someone',cond:()=>maxBondRank()>=3},
+  {key:'confidant',  cat:'bond',   glyph:'◆', name:'Confidant',  desc:'Reach Rank V with someone',  cond:()=>maxBondRank()>=5,  title:'The Confidant',   theme:'rose'},
+  {key:'soulmate',   cat:'bond',   glyph:'◆', name:'Soulmate',   desc:'Reach Rank X with someone',  cond:()=>maxBondRank()>=10, title:'Soulmate'},
+  {key:'circle',     cat:'bond',   glyph:'◆', name:'Social Circle', desc:'Hold 5 bonds at once',    cond:()=>BONDS.length>=5},
+];
+
 /* ---- in-memory state ---- */
 let USER = null;
 let PROFILE = null;
@@ -51,6 +82,10 @@ let GOALS = [];        // active goals
 let COMPLETIONS = [];  // recent completions ({goal_id, done_on})
 let BONDS = [];        // people ({id,name,relationship,xp,last_seen})
 let BOND_LOGS = [];    // hangouts ({bond_id, logged_on})
+let EARNED = new Set();     // achievement keys earned
+let EARNED_DATES = {};      // key -> earned_on
+let POPUP_QUEUE = [];       // achievements waiting to celebrate
+let POPUP_SHOWING = false;
 let CURRENT_SCREEN = 'home';
 
 /* ══════════════════════════════════════════════
@@ -76,6 +111,9 @@ function rankProgress(xp){
   return Math.max(0,Math.min(1,(xp-lo)/(hi-lo)));
 }
 function totalXp(){ return STAT_DEFS.reduce((s,d)=>s+(STATS[d.key]?.xp||0),0); }
+function maxStatRank(){ return Math.max(...STAT_DEFS.map(d=>rankFromXp(STATS[d.key]?.xp||0))); }
+function minStatRank(){ return Math.min(...STAT_DEFS.map(d=>rankFromXp(STATS[d.key]?.xp||0))); }
+function maxBondRank(){ return BONDS.length?Math.max(...BONDS.map(b=>bondRank(b.xp||0))):0; }
 function levelInfo(){
   // level curve: cumulative xp needed rises steeply each level
   const total=totalXp();
@@ -199,6 +237,9 @@ async function loadAll(){
   BONDS=b.data||[];
   const bl=await sb.from('bond_logs').select('bond_id,logged_on').eq('user_id',USER.id).gte('logged_on',since);
   BOND_LOGS=bl.data||[];
+  const ac=await sb.from('achievements').select('key,earned_on').eq('user_id',USER.id);
+  EARNED=new Set((ac.data||[]).map(r=>r.key));
+  EARNED_DATES={}; (ac.data||[]).forEach(r=>EARNED_DATES[r.key]=r.earned_on);
 }
 
 /* ══════════════════════════════════════════════
@@ -218,6 +259,7 @@ async function toggleTask(goalId){
   }
   const after=todayStatEarned(g.stat_key);
   await bumpStat(g.stat_key, after-before);
+  await evaluateAchievements(false);
   render();
 }
 async function bumpStat(key,delta){
@@ -253,13 +295,16 @@ async function logHangout(bondId){
   b.xp=(b.xp||0)+BOND_XP_PER_HANGOUT; b.last_seen=t;
   await sb.from('bonds').update({xp:b.xp,last_seen:t}).eq('id',bondId);
   await bumpStat('charm', HANGOUT_CHARM_XP);
+  await evaluateAchievements(false);
   render();
 }
 async function createBond(name, relationship){
   if(!name.trim()) return;
   const r=await sb.from('bonds').insert({user_id:USER.id,name:name.trim(),relationship}).select().single();
   if(r.error){ alert('Could not save: '+r.error.message); return; }
-  BONDS.push(r.data); CURRENT_SCREEN='bonds'; render();
+  BONDS.push(r.data);
+  await evaluateAchievements(false);
+  CURRENT_SCREEN='bonds'; render();
 }
 async function deleteBond(bondId){
   if(!confirm('Remove this person? Their hangout history goes too.')) return;
@@ -267,6 +312,61 @@ async function deleteBond(bondId){
   BONDS=BONDS.filter(x=>x.id!==bondId);
   BOND_LOGS=BOND_LOGS.filter(x=>x.bond_id!==bondId);
   render();
+}
+
+/* ---- achievements ---- */
+async function evaluateAchievements(silent){
+  const newly=ACHIEVEMENTS.filter(a=>!EARNED.has(a.key) && a.cond());
+  if(!newly.length) return;
+  const today=todayStr();
+  await sb.from('achievements').insert(newly.map(a=>({user_id:USER.id,key:a.key})));
+  newly.forEach(a=>{ EARNED.add(a.key); EARNED_DATES[a.key]=today; });
+  if(!silent){ POPUP_QUEUE.push(...newly); showNextPopup(); }
+}
+function showNextPopup(){
+  if(POPUP_SHOWING || !POPUP_QUEUE.length) return;
+  POPUP_SHOWING=true;
+  const a=POPUP_QUEUE.shift();
+  const reward = a.title||a.theme
+    ? `<div class="pop-reward">Unlocked${a.title?` title “${esc(a.title)}”`:''}${a.title&&a.theme?' + ':''}${a.theme?`${THEMES[a.theme].label} theme`:''}</div>` : '';
+  const el=document.createElement('div');
+  el.className='pop-overlay';
+  el.innerHTML=`<div class="pop-card">
+    <div class="pop-eyebrow">Achievement unlocked</div>
+    <div class="pop-glyph">${a.glyph}</div>
+    <div class="pop-name">${esc(a.name)}</div>
+    <div class="pop-desc">${esc(a.desc)}</div>
+    ${reward}
+    <button class="pop-close">Nice</button>
+  </div>`;
+  document.body.appendChild(el);
+  const close=()=>{ el.remove(); POPUP_SHOWING=false; showNextPopup(); if(!POPUP_QUEUE.length) render(); };
+  el.querySelector('.pop-close').onclick=close;
+  el.onclick=e=>{ if(e.target===el) close(); };
+}
+function unlockedTitles(){
+  const t=['The Wanderer'];
+  ACHIEVEMENTS.forEach(a=>{ if(a.title && EARNED.has(a.key)) t.push(a.title); });
+  return t;
+}
+function unlockedThemes(){
+  const t=['crimson'];
+  ACHIEVEMENTS.forEach(a=>{ if(a.theme && EARNED.has(a.key) && !t.includes(a.theme)) t.push(a.theme); });
+  return t;
+}
+function applyTheme(key){
+  const th=THEMES[key]||THEMES.crimson;
+  document.documentElement.style.setProperty('--crimson', th.c);
+  document.documentElement.style.setProperty('--blood', th.b);
+}
+async function equipTitle(title){
+  await sb.from('profiles').update({codename:title}).eq('id',USER.id);
+  PROFILE.codename=title; render();
+}
+async function equipTheme(key){
+  if(!unlockedThemes().includes(key)) return;
+  await sb.from('profiles').update({theme:key}).eq('id',USER.id);
+  PROFILE.theme=key; applyTheme(key); render();
 }
 
 /* ══════════════════════════════════════════════
@@ -287,6 +387,7 @@ function render(){
   else if(CURRENT_SCREEN==='newgoal') body.innerHTML=viewNewGoal();
   else if(CURRENT_SCREEN==='bonds') body.innerHTML=viewBonds();
   else if(CURRENT_SCREEN==='newbond') body.innerHTML=viewNewBond();
+  else if(CURRENT_SCREEN==='awards') body.innerHTML=viewAwards();
   wire();
 }
 
@@ -513,6 +614,49 @@ function viewNewBond(){
   <div class="cta"><button class="create act-createbond">ADD PERSON</button><button class="cancel act-go" data-to="bonds">Cancel</button></div>`;
 }
 
+function viewAwards(){
+  const earnedCount=EARNED.size, total=ACHIEVEMENTS.length;
+  const cats=[{k:'streak',t:'Streaks'},{k:'stat',t:'Stats'},{k:'bond',t:'Bonds'}];
+  const badge=a=>{
+    const got=EARNED.has(a.key);
+    return `<div class="badge ${got?'got':''}">
+      <div class="badge-glyph">${got?a.glyph:'<span style="opacity:.5">🔒</span>'}</div>
+      <div class="badge-name">${esc(a.name)}</div>
+      <div class="badge-desc">${esc(a.desc)}</div>
+      ${got&&(a.title||a.theme)?`<div class="badge-reward">${a.title?esc(a.title):''}${a.title&&a.theme?' · ':''}${a.theme?THEMES[a.theme].label:''}</div>`:''}
+    </div>`;
+  };
+  const section=c=>`
+    <div class="sectitle"><h2>${c.t.toUpperCase()}</h2><div class="rule"><b></b></div></div>
+    <div class="badge-grid">${ACHIEVEMENTS.filter(a=>a.cat===c.k).map(badge).join('')}</div>`;
+
+  const titles=unlockedTitles();
+  const cur=PROFILE.codename||'The Wanderer';
+  const titleChips=titles.map(t=>`<button class="chip ${t===cur?'sel':''}" data-title="${esc(t)}" style="${t===cur?'background:var(--crimson);border-color:var(--crimson);color:var(--ink)':''}"><span>${esc(t)}</span></button>`).join('');
+
+  const themes=unlockedThemes();
+  const curTheme=PROFILE.theme||'crimson';
+  const themeSwatches=Object.keys(THEMES).map(k=>{
+    const on=themes.includes(k), sel=k===curTheme;
+    return `<button class="swatch ${on?'':'locked'} ${sel?'sel':''}" data-theme="${k}" ${on?'':'disabled'}>
+      <span class="dot" style="background:${THEMES[k].c}"></span>${THEMES[k].label}${on?'':' 🔒'}</button>`;
+  }).join('');
+
+  return `
+  <div class="pagetitle">AWARDS</div>
+  <div class="pagesub">${earnedCount} of ${total} unlocked. Earn badges to unlock titles and colour themes.</div>
+
+  <div class="sectitle"><h2>TITLE</h2><div class="rule"><b></b></div></div>
+  <div class="pagesub" style="margin-bottom:12px">Shown on your level card. Tap to equip.</div>
+  <div class="chips" id="title-row">${titleChips}</div>
+
+  <div class="sectitle" style="margin-top:26px"><h2>THEME</h2><div class="rule"><b></b></div></div>
+  <div class="pagesub" style="margin-bottom:12px">Recolours the app. Unlock more by earning badges.</div>
+  <div class="swatches" id="theme-row">${themeSwatches}</div>
+
+  <div style="margin-top:30px">${cats.map(section).join('')}</div>`;
+}
+
 /* ══════════════════════════════════════════════
    WIRING (attach listeners after each render)
    ══════════════════════════════════════════════ */
@@ -526,6 +670,8 @@ function wire(){
   document.querySelectorAll('.act-newbond').forEach(b=>b.onclick=()=>{ BDRAFT={name:'',relationship:'friend'}; CURRENT_SCREEN='newbond'; render(); });
   document.querySelectorAll('.act-hang').forEach(b=>b.onclick=e=>{ e.stopPropagation(); logHangout(b.closest('.bond').dataset.bond); });
   document.querySelectorAll('.act-delbond').forEach(b=>b.onclick=e=>{ e.stopPropagation(); deleteBond(b.closest('.bond').dataset.bond); });
+  document.querySelectorAll('#title-row .chip').forEach(b=>b.onclick=()=>equipTitle(b.dataset.title));
+  document.querySelectorAll('#theme-row .swatch:not(.locked)').forEach(b=>b.onclick=()=>equipTheme(b.dataset.theme));
   if(CURRENT_SCREEN==='newbond'){
     const d=BDRAFT;
     const nm=$('#b-name'); if(nm) nm.oninput=e=>d.name=e.target.value;
@@ -606,6 +752,8 @@ async function boot(){
   $('#boot').classList.remove('hidden'); $('#boot').textContent='Loading your quest…';
   await seedIfNeeded();
   await loadAll();
+  applyTheme(PROFILE.theme||'crimson');
+  await evaluateAchievements(true);   // backfill already-earned, no pop-up spam
   $('#boot').classList.add('hidden'); $('#app').classList.remove('hidden');
   CURRENT_SCREEN='home'; render();
 }
