@@ -25,8 +25,12 @@ const DAY_INDEX = {sun:0,mon:1,tue:2,wed:3,thu:4,fri:5,sat:6}; // JS getDay()
 
 /* ---- XP / rank tuning ---- */
 const XP_PER_DIFFICULTY = 12;                 // a diff-3 tick = 36 xp
-const STAT_RANK_THRESHOLDS = [0,150,400,800,1400,2200,3200,4400]; // rank I,II,III...
+// steeper curve: each rank costs much more than the last (Rank V is a real feat)
+const STAT_RANK_THRESHOLDS = [0,200,600,1400,2800,5000,8500,13500]; // rank I,II,III...
 const ROMAN = ['','I','II','III','IV','V','VI','VII','VIII','IX','X'];
+// gentle diminishing returns: 1st tick of a stat/day full, then tapering
+const DR_FACTORS = [1, 0.6, 0.4, 0.25];
+function drFactor(i){ return DR_FACTORS[Math.min(i, DR_FACTORS.length-1)]; }
 
 /* ---- bonds tuning ---- */
 const HANGOUT_CHARM_XP = 24;                   // charm gained per logged hangout
@@ -73,26 +77,46 @@ function rankProgress(xp){
 }
 function totalXp(){ return STAT_DEFS.reduce((s,d)=>s+(STATS[d.key]?.xp||0),0); }
 function levelInfo(){
-  // level curve: cumulative xp needed rises each level
+  // level curve: cumulative xp needed rises steeply each level
   const total=totalXp();
-  let lvl=1, need=250, spent=0;
-  while(total-spent>=need){ spent+=need; lvl++; need=Math.round(need*1.15); }
+  let lvl=1, need=300, spent=0;
+  while(total-spent>=need){ spent+=need; lvl++; need=Math.round(need*1.25); }
   const into=total-spent;
   return { level:lvl, pct:Math.round(into/need*100), intoNext:into, need };
 }
 
-/* xp gained this ISO week, per stat */
+/* xp gained this ISO week, per stat — applies diminishing returns per day */
 function weeklyDeltaByStat(){
   const wk=startOfWeek(new Date());
   const out={};
   STAT_DEFS.forEach(d=>out[d.key]=0);
   const goalById=Object.fromEntries(GOALS.map(g=>[g.id,g]));
+  const byDayStat={}; // "day|stat" -> [base,base,...]
   COMPLETIONS.forEach(c=>{
+    if(new Date(c.done_on+'T00:00:00')<wk) return;
     const g=goalById[c.goal_id]; if(!g) return;
-    if(new Date(c.done_on+'T00:00:00')>=wk){ out[g.stat_key]=(out[g.stat_key]||0)+g.difficulty*XP_PER_DIFFICULTY; }
+    const k=c.done_on+'|'+g.stat_key;
+    (byDayStat[k]=byDayStat[k]||[]).push(g.difficulty*XP_PER_DIFFICULTY);
+  });
+  Object.entries(byDayStat).forEach(([k,bases])=>{
+    const stat=k.split('|')[1];
+    bases.sort((a,b)=>b-a);
+    bases.forEach((b,i)=>out[stat]+=Math.round(b*drFactor(i)));
   });
   BOND_LOGS.forEach(b=>{ if(new Date(b.logged_on+'T00:00:00')>=wk) out.charm+=HANGOUT_CHARM_XP; });
   return out;
+}
+
+/* DR-adjusted XP earned toward a stat from goal-ticks TODAY */
+function todayStatEarned(statKey){
+  const t=todayStr();
+  const goalById=Object.fromEntries(GOALS.map(g=>[g.id,g]));
+  const bases=COMPLETIONS
+    .filter(c=>c.done_on===t && goalById[c.goal_id] && goalById[c.goal_id].stat_key===statKey)
+    .map(c=>goalById[c.goal_id].difficulty*XP_PER_DIFFICULTY)
+    .sort((a,b)=>b-a);
+  let sum=0; bases.forEach((b,i)=>sum+=Math.round(b*drFactor(i)));
+  return sum;
 }
 
 /* bond rank helpers */
@@ -184,15 +208,16 @@ async function toggleTask(goalId){
   const g=GOALS.find(x=>x.id===goalId); if(!g) return;
   const t=todayStr();
   const already=doneToday(goalId);
+  const before=todayStatEarned(g.stat_key);
   if(already){
     await sb.from('completions').delete().eq('goal_id',goalId).eq('done_on',t);
     COMPLETIONS=COMPLETIONS.filter(c=>!(c.goal_id===goalId&&c.done_on===t));
-    await bumpStat(g.stat_key, -g.difficulty*XP_PER_DIFFICULTY);
   } else {
     await sb.from('completions').insert({user_id:USER.id,goal_id:goalId,done_on:t});
     COMPLETIONS.push({goal_id:goalId,done_on:t});
-    await bumpStat(g.stat_key, g.difficulty*XP_PER_DIFFICULTY);
   }
+  const after=todayStatEarned(g.stat_key);
+  await bumpStat(g.stat_key, after-before);
   render();
 }
 async function bumpStat(key,delta){
